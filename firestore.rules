@@ -1,0 +1,59 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+    function role() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+    function isAdmin() {
+      return signedIn() && role() == 'admin';
+    }
+    function isAnalyst() {
+      return signedIn() && (role() == 'analyst' || role() == 'admin');
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      // Users may create their own profile only as 'analyst'
+      allow create: if signedIn() && request.auth.uid == uid
+                    && request.resource.data.role == 'analyst';
+      // Users may update their own profile but never change role
+      allow update: if signedIn() && ((request.auth.uid == uid
+                    && request.resource.data.role == resource.data.role) || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    match /securityEvents/{id} {
+      allow read: if signedIn();
+      allow create, update: if isAnalyst();
+      allow delete: if isAdmin();
+    }
+
+    match /threatAlerts/{id} {
+      allow read: if signedIn();
+      allow create, update: if isAnalyst();
+      allow delete: if isAdmin();
+    }
+
+    match /phishingChecks/{id} {
+      allow create: if signedIn() && request.resource.data.uid == request.auth.uid;
+      allow read: if signedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow update, delete: if isAdmin();
+    }
+
+    match /incidentReports/{id} {
+      allow read, create, update: if isAnalyst();
+      allow delete: if isAdmin();
+    }
+
+    match /auditLogs/{id} {
+      allow create: if signedIn() && request.resource.data.uid == request.auth.uid;
+      allow read: if isAdmin();
+      allow update, delete: if false;
+    }
+  }
+}
